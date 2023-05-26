@@ -91,22 +91,20 @@ if GENERATE then
   G.production("T1 -->",semact8)
   G.production("F --> num",semact9)
   G.production("F --> ( E )",semact10)
-  parser1 <- make_parser(G,null);
+  parser1 <- generate_parser(G,null);
   parser1.to_json("llcalc");
-  //make_lexer ("llcalc", G)
+  make_lexer ("llcalc", G)
   if true||TRACE then
      G.printgrammar()
      printfn "parser saved to llcalc.json"
 // GENERATE
 
-(*
+
 if not(GENERATE) then
   parser1 <- load_parser(argv.[1])
   parser1.Gmr.valueterminal("num","Num",fun n -> Number(int n))  
   for i in 1..acts.Length do parser1.Gmr.set_action(i,acts.[i-1])
   if TRACE then printfn "parser loaded"
-*)
-
 
 printf "Enter Expression: "
 let lexer1 = Hornless.llcalclexer(Console.ReadLine()); // compile with ll1_lex.dll

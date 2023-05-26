@@ -372,7 +372,7 @@ let new_grammar<'AT>(start:string) =
 
 (*
   An instance of the type LLparser<'T> is created either with the
-  make_parser or the load_parser functions defined beneath.  It contains
+  generate_parser or the load_parser functions defined beneath.  It contains
   a pointer to a Grammar, a flag (errors) that determines if errors have
   occurred, and a pointer to a lexer.  The type of the lexer must conform
   to the interface AbstractLexer (defined in absLexer.cs).  Parsing occurs
@@ -425,7 +425,7 @@ type LLparser<'T> =
   }
   //  member this.convert_token (rt:RawToken) =
   //    new_stackitem("dummy",Unchecked.defaultof<'T>,0,0)
-
+  
   member this.next_la() =
     let rt = this.lexer.next_rt()  //RawToken
     // check valueterminal
@@ -548,9 +548,9 @@ type LLparser<'T> =
     let productions = Vec<jval>()
     let symbols = [for s in this.Gmr.Symbols -> jval.Str(s)]
     let nonterms = [for nt in this.Gmr.Nonterminals -> jval.Str(nt)]
+    json.["startsymbol"] <- jval.Str(this.Gmr.startsymbol)
     json.["Symbols"] <- jval.Seq(symbols)
     json.["Nonterminals"] <- jval.Seq(nonterms)
-    json.["startsymbol"] <- Str(this.Gmr.startsymbol)
     // skip first, which is metastart
     for prodi in 1..this.Gmr.Productions.Count-1 do
       let prod = this.Gmr.Productions.[prodi]
@@ -581,6 +581,16 @@ type LLparser<'T> =
     //kson
 
   /////////// end of impl LLparser
+
+let make_skeleton_parser(gmr:Grammar<'T>) =
+    {
+       LLparser.Gmr = gmr;
+       parsestack = Stack<string>();
+       rulestack = Stack<int*int>();
+       valuestack = Stack<Stackitem<'T>>();
+       errors = false;
+       lexer = null;
+    }
 
 
 /////////////////////// make_lexer from grammar
@@ -694,9 +704,9 @@ return new RawToken(""Hexnum"",yytext(),yyline,yychar-line_char,yychar);
 //make_lexer
 
 
-///////////////// make_parser ///////////////////
+///////////////// generate_parser ///////////////////
 // Function to generate LL(1) parsing table from a user-defined grammar
-let make_parser<'AT>(gmr:Grammar<'AT>,lexer) =
+let generate_parser<'AT>(gmr:Grammar<'AT>,lexer) =
   gmr.find_nullables()
   if TRACE then
     for n in gmr.Nullable do printf "Nullable %s, " n
@@ -722,21 +732,18 @@ let make_parser<'AT>(gmr:Grammar<'AT>,lexer) =
     errors = false;
     lexer = lexer;
   }
-// make_parser
+// generate_parser
 
-(*
+
 // Function to load parser from json, requires jsonparser.dll, json_lex.dll.
 // The lexer argument is usually give null.  If the loadrules arg is false,
 // then only the parsing table is loaded and it is assumed that the parser
 // is otherwise set up manually.
 let load_parser_into<'AT>(gm1:Grammar<'AT>,filename,lexer,loadrules:bool) =
-  let fd = new System.IO.FileStream(filename ,System.IO.FileMode.Open);
-  let jparser = Json.make_parser()
-  let jlexer = Hornless.jsonparserlexer(fd)
-  let jsonraw = Json.parse_with(jparser,jlexer)
+  let jsonopt = parse_json(filename)
+  let jsonraw = Option.get jsonopt
   match jsonraw with
-   | Some(Map(json)) ->
-      //printfn "Loaded JSON: %A\n" (jsondumps (Map(json)))
+   | jval.Map(json) ->
      let mutable Gmr:Grammar<'AT> = gm1
      if loadrules then
       let topsym = getstr json.["startsymbol"]
@@ -774,4 +781,3 @@ let load_parser_into<'AT>(gm1:Grammar<'AT>,filename,lexer,loadrules:bool) =
 let load_parser<'AT>(fn):LLparser<'AT> =
   load_parser_into(new_grammar<'AT>(""),fn,null,true)
 
-*)
