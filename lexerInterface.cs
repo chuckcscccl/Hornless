@@ -1,42 +1,9 @@
-namespace Fussless {
+namespace Hornless {
 using System;
-
-public interface absLexer  // not used by Fussless
-{
-   LexToken next(); // returns null at eof
-   int linenum();
-   // translator to particular grammar   
-   LexToken translate_token(LexToken t);
-}
-
-public interface AbstractLexer<ET>  // in use by Fussless
-{
-   RawToken next_lt();
-   void set_shared(ET shared);
-}
 
 public interface RawTokenizer
 {
    RawToken next_rt();
-}
-
-public class LexToken
-{
-   public string token_type;
-   public object token_value;
-   public int line;      // lines start at 0
-   public int column;    // columns start at 0
-   public int position;  // absolute beginning character position (yychar)
-   public LexToken(string t, object v) {token_type=t; token_value=v;}
-   public LexToken(string t, object v, int l, int c)
-   {token_type=t; token_value=v; line=l; column=c;}
-   public LexToken(string t, object v, int l, int c, int p)
-   {token_type=t; token_value=v; line=l; column=c; position=p;}      
-   public override string ToString() {return token_type+"("+token_value+")";}
-   public string complete_info()
-   {
-     return ("LexToken: type "+token_type+", value ("+token_value+"), type "+token_value.GetType()+", line "+line+", column "+column+", position "+position);
-   }
 }
 
 public class RawToken // deprecates LexToken - currently in use
@@ -89,22 +56,8 @@ public class Utility { // moved from specific .lex file
     {
       Console.WriteLine(errorMsg[code]);
     }
-} //Utility class
+} //Utility class for cslex
 
 
+} // Hornless namespace
 
-
-} // Fussless
-
-
-/*
-public class TerminalToken  // defined in F#
-{
-  public string sym;  // must match terminal symbol name in grammar
-  public object svalue;   // semantic value - cheap polymorphism
-  public int line;
-  public int column;
-  public TerminalToken(string s, AT v, int l, int c)
-  {sym=s; svalue=v; line=l; column=c;}
-}
-*/

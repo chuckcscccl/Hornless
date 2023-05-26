@@ -1,12 +1,10 @@
-module Recless.Base
+module Hornless.Base
 open System;
 open System.IO;
 open System.Collections.Generic;
-open Json
+open Hornless.Json
 
-//fsharpc -a recless.fs -r absLexer.dll -r jsonparser.dll -r json_lex.dll
-
-////////////////// json utilities
+//fsharpc -a recless.fs -r lexerInterface.dll -r jsonparser.dll
 
 let rec json_dumps = function
   | jval.Integer(n) -> string(n)
@@ -30,6 +28,7 @@ let rec json_dumps = function
         atleastone <- true
         str <- str + (sprintf "\"%s\":%s" kvp.Key (json_dumps kvp.Value))
      str + "}"
+  | JSONERROR -> raise(Exception("error in json processing"))
 
 let getstr = function
   | jval.Str(s) -> s
@@ -52,7 +51,6 @@ let getmap = function
   | _ -> raise(Exception("not a map"))  
 
 ////////////////// json utilities
-
 
 //////// type aliases
 type Vec<'A> = ResizeArray<'A>
@@ -85,6 +83,7 @@ let new_stackitem<'T>(s,v:'T,l,c) =
   uid_counter <- uid_counter + 1UL;
   {Stackitem.symbol=s; value=v; line=l; column=c; uid=uid_counter;}
 let lbox = new_stackitem  // constructor
+
 // active pattern to expose Stackitems as just values (like deref coercion
 // in Rust).
 let (|Item|) (t:Stackitem<'AT>) =  Item(t.value);
@@ -129,6 +128,7 @@ type Grammar<'T> =
     LL1Table : HashMap<string,HashMap<string,int>>;
     valueterminals : HashMap<string,string*(string -> 'T)>;
     lexterminals: HashMap<string,string>; // maps ":" to "COLON"
+    haslexval: HashSet<string>; // inverse of value/lex terminals
   }
   // impl Grammar:
   member this.terminal (s:string) =
@@ -140,6 +140,7 @@ type Grammar<'T> =
     if not(this.Nonterminals.Contains(tname)) then
       this.Symbols.Add(tname) |> ignore
       this.valueterminals.[tokenname] <- (tname,conv)
+      this.haslexval.Add(tname) |> ignore
     else
       printfn "CONFLICTING DEFINITION OF SYMBOL %s AS NONTERMINAL" tname
 
@@ -147,6 +148,7 @@ type Grammar<'T> =
     if not(this.Nonterminals.Contains(tname)) then
       this.Symbols.Add(tname) |> ignore
       this.lexterminals.[tokenform] <- tname
+      this.haslexval.Add(tname) |> ignore
     else
       printfn "CONFLICTING DEFINITION OF SYMBOL %s IGNORED" tname
 
@@ -327,6 +329,16 @@ type Grammar<'T> =
     //for each rule
   //create table
 
+  member this.print_table() = //call after make_table
+    printf "let ll1table = "
+    printf "["
+    for kv in this.LL1Table do
+      printf "(%A,[" kv.Key
+      for vk in kv.Value do
+        printf "(%A,%A);" vk.Key vk.Value
+      printf "]);"
+    printfn "]"
+
 //////// end of impl Grammar
 
 // Creating a new grammar: must give starting non-terminal as it
@@ -344,6 +356,7 @@ let new_grammar<'AT>(start:string) =
       LL1Table = HashMap<string,HashMap<string,int>>();
       valueterminals = HashMap<string,string*(string -> 'AT)>();
       lexterminals = HashMap<string,string>();
+      haslexval = HashSet<string>();
     }
   gmr.Nonterminals.Add(start) |> ignore
   gmr.Symbols.Add(start) |> ignore
@@ -408,13 +421,13 @@ type LLparser<'T> =
     rulestack : Stack<int*int>; // rule number and position on VALUESTACK
     valuestack : Stack<Stackitem<'T>>;
     mutable errors : bool;  // determines if errors occurred
-    mutable lexer : Fussless.AbstractLexer<unit>; //returns RawTokens
+    mutable lexer : RawTokenizer; //returns RawTokens
   }
-  //  member this.convert_token (rt:Fussless.RawToken) =
+  //  member this.convert_token (rt:RawToken) =
   //    new_stackitem("dummy",Unchecked.defaultof<'T>,0,0)
 
   member this.next_la() =
-    let rt = this.lexer.next_lt()  //RawToken
+    let rt = this.lexer.next_rt()  //RawToken
     // check valueterminal
     if this.Gmr.valueterminals.ContainsKey(rt.token_name) then
       let (tname,f) = this.Gmr.valueterminals.[rt.token_name]
@@ -532,11 +545,9 @@ type LLparser<'T> =
     // create a jval structure as defined in jsonparser.dll
     let json = Dictionary<string,jval>()
     // collect symbols, nonterminals into lists
-    let symbols = Vec<jval>()
-    let nonterms = Vec<jval>()
     let productions = Vec<jval>()
-    for s in this.Gmr.Symbols do symbols.Add(Str(s))
-    for nt in this.Gmr.Nonterminals do nonterms.Add(Str(nt))
+    let symbols = [for s in this.Gmr.Symbols -> jval.Str(s)]
+    let nonterms = [for nt in this.Gmr.Nonterminals -> jval.Str(nt)]
     json.["Symbols"] <- jval.Seq(symbols)
     json.["Nonterminals"] <- jval.Seq(nonterms)
     json.["startsymbol"] <- Str(this.Gmr.startsymbol)
@@ -544,14 +555,14 @@ type LLparser<'T> =
     for prodi in 1..this.Gmr.Productions.Count-1 do
       let prod = this.Gmr.Productions.[prodi]
       let thisprod = HashMap<string,jval>()
-      let thisrhs = Vec<jval>()
-      for r in prod.rhs do thisrhs.Add(Str(r))
+      let thisrhs = [for r in prod.rhs -> jval.Str(r)]
       thisprod.["lhs"] <- Str(prod.lhs)
       thisprod.["rhs"] <- Seq(thisrhs)
       // semantic actions loaded separately
       productions.Add(Map(thisprod))
     // for each production
-    json.["Productions"] <- Seq(productions)
+    let prods = [for p in productions -> p]
+    json.["Productions"] <- Seq(prods) //ResizeArray.toList productions
     let table = HashMap<string,jval>()
     for kvp in this.Gmr.LL1Table do
       let colmap = HashMap<string,jval>()
@@ -572,6 +583,118 @@ type LLparser<'T> =
   /////////// end of impl LLparser
 
 
+/////////////////////// make_lexer from grammar
+let make_lexer<'AT> (name:string, gmr:Grammar<'AT>) =
+   let mutable lexer = sprintf "//CsLex file generated from Hornless grammar %s
+#pragma warning disable 0414
+using System;
+using System.Text;\n\n" name
+   lexer <- lexer+ sprintf "public class %slexer : RawTokenizer  {\n" name
+   lexer <- lexer+ "  Yylex lexer;\n"
+   lexer <- lexer+ sprintf "  public %slexer(string n) { lexer = new Yylex(new System.IO.StringReader(n)); }\n" name
+   lexer <- lexer+ sprintf "  public %slexer(System.IO.FileStream f) { lexer=new Yylex(f); }\n" name
+   lexer <- lexer+ "  public RawToken next_rt() => lexer.yylex();\n}//lexer class\n\n"
+   lexer <- lexer + @"%%
+%namespace Hornless
+%type RawToken
+%eofval{
+  return new RawToken(""EOF"",""EOF"",yyline,yychar);
+%eofval}
+%{
+private static int comment_count = 0;
+private static int line_char = 0;
+%}
+%line
+%char
+%state COMMENT
+
+ALPHA=[A-Za-z]
+DIGIT=[0-9]
+DIGITS=[0-9]+
+FLOATS = [0-9]*\.[0-9]+([eE]([+-]?){DIGITS})?
+HEXDIGITS=(0x)[0-9A-Fa-f]*
+NEWLINE=((\r\n)|\n)
+NONNEWLINE_WHITE_SPACE_CHAR=[\ \t\b\012]
+WHITE_SPACE_CHAR=[{NEWLINE}\ \t\b\012]
+STRING_TEXT=(\\\""|[^{NEWLINE}\""]|{WHITE_SPACE_CHAR}+)*
+COMMENT_TEXT=([^*/\r\n]|[^*\r\n]""/""[^*\r\n]|[^/\r\n]""*""[^/\r\n]|""*""[^/\r\n]|""/""[^*\r\n])*
+ALPHANUM=[A-Za-z_][A-Za-z0-9_]*
+"
+   lexer <- lexer+ @"%%
+<YYINITIAL> {NEWLINE}+ { line_char = yychar+yytext().Length; return null; }
+<YYINITIAL> {NONNEWLINE_WHITE_SPACE_CHAR}+ { return null; }
+"
+   //////////// now for all terminals
+   // write Lexnames forms first
+   for form in gmr.lexterminals.Keys do
+     lexer <- lexer+ sprintf "<YYINITIAL> \"%s\" { return new RawToken(\"%s\",yytext(),yyline,yychar-line_char,yychar); }\n" form form
+   for sym in gmr.Symbols do
+     if not(gmr.Nonterminals.Contains(sym)) && not(gmr.haslexval.Contains(sym)) && sym<>"EOF" then 
+       lexer <- lexer+ sprintf "<YYINITIAL> \"%s\" { return new RawToken(\"%s\",yytext(),yyline,yychar-line_char,yychar); }\n" sym sym
+
+   let mutable linecomment = "//"
+   if linecomment<>"disable" then
+     lexer<- lexer+ sprintf "\n<YYINITIAL> \"%s\".*\\n { line_char=yychar+yytext().Length; return null; }\n" linecomment
+   lexer <- lexer+ @"<YYINITIAL,COMMENT> [(\r\n?|\n)] { line_char=yychar+yytext().Length; return null; }
+
+<YYINITIAL> ""/*"" { yybegin(COMMENT); comment_count = comment_count + 1; return null;
+}
+<COMMENT> ""/*"" { comment_count = comment_count + 1; return null; }
+<COMMENT> ""*/"" { 
+	comment_count = comment_count - 1;
+	if (comment_count == 0) {
+            yybegin(YYINITIAL);
+        }
+        return null;
+}
+
+<COMMENT> {COMMENT_TEXT} { return null; }
+
+<YYINITIAL> \""{STRING_TEXT}\"" {
+        return new RawToken(""StrLit"",yytext(),yyline,yychar-line_char,yychar);
+}
+<YYINITIAL> \""{STRING_TEXT} {
+	String str =  yytext().Substring(1,yytext().Length);
+	Utility.error(Utility.E_UNCLOSEDSTR);
+        return new RawToken(""Unclosed String"",str,yyline,yychar-line_char,yychar);
+}
+"
+   //// important categories
+   lexer<- lexer+ @"<YYINITIAL> {DIGIT}+ { 
+  return new RawToken(""Num"",yytext(),yyline,yychar-line_char,yychar);
+}
+<YYINITIAL> {HEXDIGITS} { 
+return new RawToken(""Hexnum"",yytext(),yyline,yychar-line_char,yychar);  
+}
+<YYINITIAL> {FLOATS} { 
+  return new RawToken(""Float"",yytext(),yyline,yychar-line_char,yychar);
+}
+<YYINITIAL> ({ALPHA}|_)({ALPHA}|{DIGIT}|_)* {
+        return new RawToken(""Alphanum"",yytext(),yyline,yychar-line_char,yychar);
+}	
+<YYINITIAL,COMMENT> . {
+	StringBuilder sb = new StringBuilder(""Illegal character: <"");
+	String s = yytext();
+	for (int i = 0; i < s.Length; i++)
+	  if (s[i] >= 32)
+	    sb.Append(s[i]);
+	  else
+	    {
+	    sb.Append(""^"");
+	    sb.Append(Convert.ToChar(s[i]+'A'-1));
+	    }
+        sb.Append("">"");
+	Console.WriteLine(sb.ToString());	
+	Utility.error(Utility.E_UNMATCHED);
+        return null;
+}
+"
+   System.IO.File.WriteAllText(sprintf "%s.lex" name, lexer)
+   //printfn "LEXER OUT: %s" lexer
+//make_lexer
+
+
+///////////////// make_parser ///////////////////
 // Function to generate LL(1) parsing table from a user-defined grammar
 let make_parser<'AT>(gmr:Grammar<'AT>,lexer) =
   gmr.find_nullables()
@@ -601,7 +724,7 @@ let make_parser<'AT>(gmr:Grammar<'AT>,lexer) =
   }
 // make_parser
 
-
+(*
 // Function to load parser from json, requires jsonparser.dll, json_lex.dll.
 // The lexer argument is usually give null.  If the loadrules arg is false,
 // then only the parsing table is loaded and it is assumed that the parser
@@ -609,7 +732,7 @@ let make_parser<'AT>(gmr:Grammar<'AT>,lexer) =
 let load_parser_into<'AT>(gm1:Grammar<'AT>,filename,lexer,loadrules:bool) =
   let fd = new System.IO.FileStream(filename ,System.IO.FileMode.Open);
   let jparser = Json.make_parser()
-  let jlexer = Fussless.jsonlexer<unit>(fd)
+  let jlexer = Hornless.jsonparserlexer(fd)
   let jsonraw = Json.parse_with(jparser,jlexer)
   match jsonraw with
    | Some(Map(json)) ->
@@ -650,3 +773,5 @@ let load_parser_into<'AT>(gm1:Grammar<'AT>,filename,lexer,loadrules:bool) =
 
 let load_parser<'AT>(fn):LLparser<'AT> =
   load_parser_into(new_grammar<'AT>(""),fn,null,true)
+
+*)
