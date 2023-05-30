@@ -1,5 +1,5 @@
 open System;
-open Hornless.Base
+open Recless.Base
 
 //////fsharpc llcalc.fs -r recless.dll -r ll1_lex.dll
 
@@ -66,6 +66,7 @@ let semact10 (rhs:Vec<Stackitem<semval_t>>) =  // F --> ( E )
 
 let acts = [semact1;semact2;semact3;semact4;semact5;semact6;semact7;semact8;semact9;semact10]
 
+
 /////////// generate or load
 
 let mutable GENERATE = true
@@ -73,8 +74,6 @@ let argv = Environment.GetCommandLineArgs();
 if argv.Length>1 then GENERATE <- false
 
 let mutable parser1:LLparser<semval_t> = Unchecked.defaultof<LLparser<semval_t>>
-
-//let mutable semacts = []
 
 if GENERATE then
   let G = new_grammar<semval_t>("E")
@@ -92,16 +91,12 @@ if GENERATE then
   G.production("T1 -->",semact8)
   G.production("F --> num",semact9)
   G.production("F --> ( E )",semact10)
-  parser1 <- generate_parser(G,null);
+  parser1 <- make_parser(G,null);
   parser1.to_json("llcalc");
-  make_lexer ("llcalc", G)
   if true||TRACE then
      G.printgrammar()
      printfn "parser saved to llcalc.json"
-  //semacts <- G.collect_actions()
 // GENERATE
-
-
 
 if not(GENERATE) then
   parser1 <- load_parser(argv.[1])
@@ -109,8 +104,10 @@ if not(GENERATE) then
   for i in 1..acts.Length do parser1.Gmr.set_action(i,acts.[i-1])
   if TRACE then printfn "parser loaded"
 
+
+
 printf "Enter Expression: "
-let lexer1 = Hornless.llcalclexer(Console.ReadLine()); // compile with ll1_lex.dll
+let lexer1 = Fussless.ll1lexer(Console.ReadLine()); // compile with ll1_lex.dll
 parser1.set_scanner lexer1
 
 let result = parser1.parse()
@@ -118,4 +115,3 @@ if not(parser1.errors) then printfn "result = %A" result
 
 //////// testing json output
 //printfn "JSON: %A" (json_dumps (parser1.to_json("calcll")))
-

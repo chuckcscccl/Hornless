@@ -339,9 +339,6 @@ type Grammar<'T> =
       printf "]);"
     printfn "]"
 
-  member this.collect_actions() =
-    [for p in this.Productions -> p.action]
-
 //////// end of impl Grammar
 
 // Creating a new grammar: must give starting non-terminal as it
